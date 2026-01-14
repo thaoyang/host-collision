@@ -1,0 +1,80 @@
+{
+  "mongodb": {
+    "connections": {
+      "hostcollision": {
+        "host": "xxx",
+        "port": 27017,
+        "username": "xxx",
+        "password": "xxx",
+        "uri": "mongodb://xxx:xxx@xxx:27017/"
+      }
+    }
+  },
+  "main1_prepare_slds": {
+    "targetlst": [
+      "https://www.example.com" 
+    ],
+    "svpath": "sld_output/",
+    "dm_keywords": [
+      "example",
+      "keyword1",
+      "keyword2"
+    ]
+  },
+  "passiveDNS": {
+    "urls": {
+      "domestic": "https://fdp.qianxin**/********/dtree/{DM}",
+      "abroad": "https://fdp.qianxin**/********/dtree/{DM}"
+    },
+    "api_credentials": {
+      "fdp-access": "********",
+      "fdp-secret": "****************"
+    },
+    "timeout": {
+      "min_timeout": 600,
+      "initial_timeout": 600,
+      "delta": 120,
+      "max_try_times": 10
+    },
+    "max_records": 100000000
+  },
+  "main2_host_collision": {
+    "check_cycle": 60,
+    "directories": {
+      "checker_dir": "host_collision_checker_Go",
+      "collision_dir": "host_collision_Go",
+      "main2_log_dir": "main2Log"
+    },
+    "databases": {
+      "for_collision": "ForCollision",
+      "host": "host",
+      "ip": "ip",
+      "hosts_ok_supervisor": "hosts-ok-supervisor-1",
+      "hosts_ok": "hosts-ok-1"
+    },
+    "collection_patterns": {
+      "ip": "{sld}-ip",
+      "host": "{sld}-host",
+      "hosts_ok": "{sld}-hosts_ok",
+      "spv": "{sld}-spv",
+      "nondm": "{sld}-nondm",
+      "dtree": "{sld}-DTree-{start_time}TO{end_time}",
+      "dtree_process": "{sld}-DTree-{start_time}TO{end_time}-Process",
+      "adns": "{sld}-adns",
+      "adns_asn": "{sld}-adns-asn"
+    },
+    "log_files": {
+      "checker": "checker-{sld}.log",
+      "main2": "main2Log/main2-{sld}.log"
+    },
+    "time_range": {
+      "start_time": "20210601000000",
+      "end_time": "20250601000000"
+    },
+    "default_max_goroutine_multiplier": 3
+  },
+  "ipscan_module": {
+    "geolite2_asn_db_path": "ipscan_module/GeoLite2-ASN.mmdb",
+    "batch_size": 500
+  }
+}
