@@ -28,18 +28,18 @@ import (
 
 var logger = logrus.New()
 
-// IP速率限制器结构
+// IP rate limiter structure
 type IPRateLimiter struct {
 	mu                 sync.Mutex
-	lastRequestTime    map[string]time.Time // 每个IP的最后请求时间
-	requestCount       map[string]int       // 每个IP的连续请求计数
-	pauseUntil         map[string]time.Time // 每个IP的暂停截止时间
-	maxRequestsPerIP   int                  // 每个IP的最大连续请求数
-	pauseDuration      time.Duration        // 暂停时长
-	minRequestInterval time.Duration        // 最小请求间隔（1秒）
+	lastRequestTime    map[string]time.Time // Last request time for each IP
+	requestCount       map[string]int       // Consecutive request count for each IP
+	pauseUntil         map[string]time.Time // Pause deadline for each IP
+	maxRequestsPerIP   int                  // Maximum consecutive requests per IP
+	pauseDuration      time.Duration        // Pause duration
+	minRequestInterval time.Duration        // Minimum request interval (1 second)
 }
 
-// 创建新的IP速率限制器
+// Create a new IP rate limiter
 func NewIPRateLimiter(maxRequests int, pauseDuration time.Duration, minInterval time.Duration) *IPRateLimiter {
 	return &IPRateLimiter{
 		lastRequestTime:    make(map[string]time.Time),
@@ -51,13 +51,13 @@ func NewIPRateLimiter(maxRequests int, pauseDuration time.Duration, minInterval 
 	}
 }
 
-// 从URL中提取IP地址
+// Extract IP address from URL
 func extractIPFromURL(urlStr string) string {
-	// 移除协议前缀 (http:// 或 https://)
+	// Remove protocol prefix (http:// or https://)
 	urlStr = strings.TrimPrefix(urlStr, "http://")
 	urlStr = strings.TrimPrefix(urlStr, "https://")
 
-	// 处理IPv6地址 [::1] 格式
+	// Handle IPv6 address format [::1]
 	if strings.HasPrefix(urlStr, "[") {
 		end := strings.Index(urlStr, "]")
 		if end > 0 {
@@ -65,19 +65,19 @@ func extractIPFromURL(urlStr string) string {
 		}
 	}
 
-	// 处理IPv4地址或IPv6地址（无括号）
-	// 提取IP部分（可能包含端口，但这里我们只需要IP）
+	// Handle IPv4 or IPv6 address (without brackets)
+	// Extract IP part (may contain port, but we only need IP here)
 	parts := strings.Split(urlStr, "/")
 	if len(parts) > 0 {
 		ipPart := parts[0]
-		// 移除端口号（如果有）
+		// Remove port number (if any)
 		if colonIdx := strings.LastIndex(ipPart, ":"); colonIdx > 0 {
-			// 检查是否是IPv6地址（IPv6地址中可能包含多个冒号）
+			// Check if it's an IPv6 address (IPv6 addresses may contain multiple colons)
 			if strings.Count(ipPart, ":") > 1 {
-				// IPv6地址，不处理
+				// IPv6 address, don't process
 				return ipPart
 			}
-			// IPv4地址带端口，移除端口
+			// IPv4 address with port, remove port
 			return ipPart[:colonIdx]
 		}
 		return ipPart
@@ -85,51 +85,51 @@ func extractIPFromURL(urlStr string) string {
 	return urlStr
 }
 
-// 检查是否可以发送请求，如果可以则更新状态
+// Check if a request can be sent, and update state if possible
 func (rl *IPRateLimiter) CanSendRequest(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
 	now := time.Now()
 
-	// 检查是否在暂停期内
+	// Check if in pause period
 	if pauseTime, exists := rl.pauseUntil[ip]; exists {
 		if now.Before(pauseTime) {
-			// 仍在暂停期，不能发送
+			// Still in pause period, cannot send
 			return false
 		}
-		// 暂停期已过，清除暂停状态和计数器
+		// Pause period has passed, clear pause state and counter
 		delete(rl.pauseUntil, ip)
 		rl.requestCount[ip] = 0
 	}
 
-	// 检查请求间隔（每秒最多1个请求）
+	// Check request interval (maximum 1 request per second)
 	if lastTime, exists := rl.lastRequestTime[ip]; exists {
 		elapsed := now.Sub(lastTime)
 		if elapsed < rl.minRequestInterval {
-			// 请求间隔太短，需要等待
+			// Request interval too short, need to wait
 			return false
 		}
 	}
 
-	// 更新请求计数
+	// Update request count
 	rl.requestCount[ip]++
 
-	// 检查是否达到最大请求数
+	// Check if maximum request count is reached
 	if rl.requestCount[ip] >= rl.maxRequestsPerIP {
-		// 达到限制，设置暂停时间
+		// Reached limit, set pause time
 		rl.pauseUntil[ip] = now.Add(rl.pauseDuration)
-		rl.requestCount[ip] = 0 // 重置计数器
+		rl.requestCount[ip] = 0 // Reset counter
 		logger.Info(fmt.Sprintf("IP %s reached %d requests, pausing for %v", ip, rl.maxRequestsPerIP, rl.pauseDuration))
 	}
 
-	// 更新最后请求时间
+	// Update last request time
 	rl.lastRequestTime[ip] = now
 
 	return true
 }
 
-// 等待直到可以发送请求
+// Wait until a request can be sent
 func (rl *IPRateLimiter) WaitUntilCanSend(ip string) {
 	for {
 		if rl.CanSendRequest(ip) {
@@ -140,12 +140,12 @@ func (rl *IPRateLimiter) WaitUntilCanSend(ip string) {
 		now := time.Now()
 		var waitTime time.Duration
 
-		// 计算需要等待的时间
+		// Calculate wait time needed
 		if pauseTime, exists := rl.pauseUntil[ip]; exists {
-			// 在暂停期
+			// In pause period
 			waitTime = pauseTime.Sub(now)
 		} else if lastTime, exists := rl.lastRequestTime[ip]; exists {
-			// 需要等待请求间隔
+			// Need to wait for request interval
 			elapsed := now.Sub(lastTime)
 			if elapsed < rl.minRequestInterval {
 				waitTime = rl.minRequestInterval - elapsed
@@ -159,7 +159,7 @@ func (rl *IPRateLimiter) WaitUntilCanSend(ip string) {
 			}
 			time.Sleep(waitTime)
 		} else {
-			// 短暂等待后重试
+			// Retry after brief wait
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
@@ -177,15 +177,15 @@ type Response struct {
 	Isinetdm   string `json:"isinetdm"`
 }
 
-// 判断数据库中某个集合是否存在
+// Check if a collection exists in the database
 func collectionExists(database *mongo.Database, collectionName string) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 超时处理机制
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Timeout handling
 	defer cancel()
-	collections, err := database.ListCollectionNames(ctx, bson.D{}) // 列出数据库中的集合名称
+	collections, err := database.ListCollectionNames(ctx, bson.D{}) // List collection names in the database
 	if err != nil {
 		return false, err
 	}
-	for _, name := range collections { // 检查目标集合是否在集合列表中
+	for _, name := range collections { // Check if target collection is in the collection list
 		if name == collectionName {
 			return true, nil
 		}
@@ -193,13 +193,13 @@ func collectionExists(database *mongo.Database, collectionName string) (bool, er
 	return false, nil
 }
 
-// 替换非法 UTF-8 字符为指定字符，例如 "?"
+// Replace invalid UTF-8 characters with a specified character, e.g., "?"
 func replaceInvalidUTF8(input string) string {
 	valid := make([]rune, 0, len(input))
 	for i := 0; i < len(input); {
 		r, size := utf8.DecodeRuneInString(input[i:])
 		if r == utf8.RuneError && size == 1 {
-			valid = append(valid, '?') // 替换非法字符
+			valid = append(valid, '?') // Replace invalid character
 			i++
 		} else {
 			valid = append(valid, r)
@@ -209,7 +209,7 @@ func replaceInvalidUTF8(input string) string {
 	return string(valid)
 }
 
-// 存储结果到MongoDB
+// Store results to MongoDB
 func storeResultsToMongoDB(res *Response, collection *mongo.Collection, filter200 bool) {
 	if !filter200 {
 		_, err := collection.InsertOne(context.TODO(), bson.D{
@@ -247,53 +247,53 @@ func storeResultsToMongoDB(res *Response, collection *mongo.Collection, filter20
 }
 
 func processRequests(client *mongo.Client, sld string, ips []string, Hosts map[string]interface{}, maxConcurrentRequests int, sld_id interface{}, RecheckInetdm bool) {
-	// 创建IP速率限制器：每IP每秒最多1个请求，连续10000次后暂停1小时
+	// Create IP rate limiter: maximum 1 request per second per IP, pause for 1 hour after 10,000 consecutive requests
 	ipRateLimiter := NewIPRateLimiter(10000, 1*time.Hour, 1*time.Second)
 
-	// 生成测试数据
+	// Generate test data
 	var urls []string
 	for _, ip := range ips {
-		// 生成https的url
+		// Generate https URL
 		parsedIP := net.ParseIP(ip)
 		if parsedIP == nil {
-			fmt.Printf("Skipping invalid IP: %s\n", ip) // 如果IP无效，跳过处理
+			fmt.Printf("Skipping invalid IP: %s\n", ip) // Skip processing if IP is invalid
 			continue
 		}
 		if parsedIP.To4() != nil {
-			urls = append(urls, fmt.Sprintf("https://%s", ip)) // IPv4地址
+			urls = append(urls, fmt.Sprintf("https://%s", ip)) // IPv4 address
 		} else {
-			urls = append(urls, fmt.Sprintf("https://[%s]", ip)) // IPv6地址
+			urls = append(urls, fmt.Sprintf("https://[%s]", ip)) // IPv6 address
 		}
 	}
 	for _, ip := range ips {
-		// 生成http的url
+		// Generate http URL
 		parsedIP := net.ParseIP(ip)
 		if parsedIP == nil {
-			fmt.Printf("Skipping invalid IP: %s\n", ip) // 如果IP无效，跳过处理
+			fmt.Printf("Skipping invalid IP: %s\n", ip) // Skip processing if IP is invalid
 			continue
 		}
 		if parsedIP.To4() != nil {
-			urls = append(urls, fmt.Sprintf("http://%s", ip)) // IPv4地址
+			urls = append(urls, fmt.Sprintf("http://%s", ip)) // IPv4 address
 		} else {
-			urls = append(urls, fmt.Sprintf("http://[%s]", ip)) // IPv6地址
+			urls = append(urls, fmt.Sprintf("http://[%s]", ip)) // IPv6 address
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second) // 读取数据库超时时间设置为600s
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second) // Set database read timeout to 600s
 	defer cancel()
 
-	semaphore := make(chan struct{}, maxConcurrentRequests) // 信号量，用于控制发送http报文的协程数量
+	semaphore := make(chan struct{}, maxConcurrentRequests) // Semaphore to control the number of goroutines sending HTTP requests
 
-	// 生成对照组
+	// Generate control group
 	logger.Info("Processing IPControl...")
-	db := client.Database("hosts-ok-ipcontrol-1") // 生成数据库
+	db := client.Database("hosts-ok-ipcontrol-1") // Create database
 	ipcontrol_cl_name := sld + "-IPcontrol"
 	ipcontrolExist, err := collectionExists(db, ipcontrol_cl_name)
-	ipcontrol_collection := db.Collection(ipcontrol_cl_name) // 待写入&读取的数据库集合
+	ipcontrol_collection := db.Collection(ipcontrol_cl_name) // Database collection for reading and writing
 	if !ipcontrolExist {
-		// 如果不存在，再获取对照组数据，并写入对照组数据库
-		var wg3 sync.WaitGroup // 消费者协程控制
-		var wg4 sync.WaitGroup // 生产者协程控制
+		// If it doesn't exist, get control group data and write to control group database
+		var wg3 sync.WaitGroup // Consumer goroutine control
+		var wg4 sync.WaitGroup // Producer goroutine control
 		ipResults := make(chan *Response, maxConcurrentRequests)
 
 		wg3.Add(1)
@@ -304,24 +304,24 @@ func processRequests(client *mongo.Client, sld string, ips []string, Hosts map[s
 			}
 		}()
 
-		for _, host := range []string{sld, "", "xxxyyyzzz." + sld, "A123.123-b.c-123." + sld} { // 作为生产者，发送http请求写入通道，通过信号量控制协程最大并发数量
-			for _, url := range urls { // 对照组由四次http请求结构组成：host为sld,不带host，两个大概率不存在的子域名
+		for _, host := range []string{sld, "", "xxxyyyzzz." + sld, "A123.123-b.c-123." + sld} { // As producer, send HTTP requests to channel, control maximum goroutine concurrency via semaphore
+			for _, url := range urls { // Control group consists of four HTTP request structures: host as sld, without host, two subdomains that likely don't exist
 				wg4.Add(1)
-				semaphore <- struct{}{} // 信号量控制最多运行的协程数
+				semaphore <- struct{}{} // Semaphore controls maximum number of running goroutines
 				go func(url string, host string) {
 					defer func() {
 						<-semaphore
 						wg4.Done()
 					}() // release semaphore
 
-					// 提取IP并应用速率限制
+					// Extract IP and apply rate limiting
 					ip := extractIPFromURL(url)
 					ipRateLimiter.WaitUntilCanSend(ip)
 
 					var finalRes *Response
-					// 尝试5次请求，每次中间会有一次重试，所以最多尝试10次
+					// Try 5 requests, each with one retry in between, so maximum 10 attempts
 					for i := 0; i < 5; i++ {
-						// 每次重试前也要检查速率限制
+						// Check rate limit before each retry
 						if i > 0 {
 							ipRateLimiter.WaitUntilCanSend(ip)
 						}
@@ -330,11 +330,11 @@ func processRequests(client *mongo.Client, sld string, ips []string, Hosts map[s
 							finalRes = res
 							break
 						}
-						// 记录最后一次请求结果
+						// Record the last request result
 						if i == 4 {
 							finalRes = res
 						}
-						// 如果不是最后一次请求，等待1秒
+						// If not the last request, wait 1 second
 						if i < 4 {
 							time.Sleep(1 * time.Second)
 						}
@@ -349,24 +349,24 @@ func processRequests(client *mongo.Client, sld string, ips []string, Hosts map[s
 		}
 
 		wg4.Wait()
-		close(ipResults) // 关闭通道保证消费者读取通道完成后不再阻塞直接退出
+		close(ipResults) // Close channel to ensure consumer exits without blocking after reading channel completes
 		wg3.Wait()
 		logger.Info("IPControl has generated successfully!")
 	}
 	logger.Info("Reading IPControl and Initializing inputs...")
-	cursor, err := ipcontrol_collection.Find(ctx, bson.M{}) // 查询所有记录
+	cursor, err := ipcontrol_collection.Find(ctx, bson.M{}) // Query all records
 	if err != nil {
-		log.Fatalf("查询失败: %v", err)
+		log.Fatalf("Query failed: %v", err)
 	}
 	defer cursor.Close(ctx)
-	type ctrolRecord struct { // 定义查询结构体
+	type ctrolRecord struct { // Define query structure
 		Statuscode int
 		Title      string
 		Patchdata  string
 	}
-	urlMap := make(map[string][]ctrolRecord) // 初始化 map
+	urlMap := make(map[string][]ctrolRecord) // Initialize map
 	for cursor.Next(ctx) {
-		// 遍历查询结果
+		// Iterate through query results
 		var result struct {
 			URL        string `bson:"url"`
 			Statuscode int    `bson:"status_code"`
@@ -375,27 +375,27 @@ func processRequests(client *mongo.Client, sld string, ips []string, Hosts map[s
 		}
 
 		if err := cursor.Decode(&result); err != nil {
-			log.Fatalf("解码记录失败: %v", err)
+			log.Fatalf("Failed to decode record: %v", err)
 		}
 
 		if result.Statuscode == 0 {
 			continue
 		}
 
-		urlMap[result.URL] = append(urlMap[result.URL], ctrolRecord{ // 将新记录存入urlMap
+		urlMap[result.URL] = append(urlMap[result.URL], ctrolRecord{ // Store new record in urlMap
 			Statuscode: result.Statuscode,
 			Title:      result.Title,
 			Patchdata:  result.Patchdata,
 		})
 	}
 
-	// HC测试
-	urls = []string{} // 提取所有键（URL）并存储在切片中，从而更新url切片，从而排除超时不可达的ip
+	// HC testing
+	urls = []string{} // Extract all keys (URLs) and store in slice, updating url slice to exclude unreachable IPs due to timeout
 	for url := range urlMap {
 		urls = append(urls, url)
 	}
 	if err := cursor.Err(); err != nil {
-		log.Fatalf("遍历记录失败: %v", err)
+		log.Fatalf("Failed to iterate records: %v", err)
 	} else if !RecheckInetdm {
 		update_info := bson.M{
 			"$set": bson.M{
@@ -411,8 +411,8 @@ func processRequests(client *mongo.Client, sld string, ips []string, Hosts map[s
 	hc_ok_name := sld + "-hosts_ok"
 	hc_ok_collection := db.Collection(hc_ok_name)
 	hcResults := make(chan *Response, maxConcurrentRequests)
-	var wg1 sync.WaitGroup // 消费者协程控制
-	var wg2 sync.WaitGroup // 生产者协程控制
+	var wg1 sync.WaitGroup // Consumer goroutine control
+	var wg2 sync.WaitGroup // Producer goroutine control
 	wg1.Add(1)
 	go func() {
 		defer wg1.Done()
@@ -454,15 +454,15 @@ func processRequests(client *mongo.Client, sld string, ips []string, Hosts map[s
 	spv_host := sld + "-host"
 	host_collection := db.Collection(spv_host)
 
-	for host, hostInfo := range Hosts { // 作为生产者，对Hosts进行迭代查询，发送http请求写入通道，通过信号量控制协程最大并发数量
-		// 类型断言获取isinetdm值
+	for host, hostInfo := range Hosts { // As producer, iterate through Hosts, send HTTP requests to channel, control maximum goroutine concurrency via semaphore
+		// Type assertion to get isinetdm value
 		info, ok := hostInfo.(map[string]interface{})
 		if !ok {
 			continue
 		}
 		isinetdm, ok := info["isinetdm"].(string)
 		if !ok {
-			isinetdm = "false" // 默认值
+			isinetdm = "false" // Default value
 		}
 		id := info["_id"]
 
@@ -475,7 +475,7 @@ func processRequests(client *mongo.Client, sld string, ips []string, Hosts map[s
 					wg2.Done()
 				}()
 
-				// 提取IP并应用速率限制
+				// Extract IP and apply rate limiting
 				ip := extractIPFromURL(url)
 				ipRateLimiter.WaitUntilCanSend(ip)
 
@@ -487,7 +487,7 @@ func processRequests(client *mongo.Client, sld string, ips []string, Hosts map[s
 			}(url, host, isinetdm)
 		}
 		if !RecheckInetdm {
-			// 查找 _id 为 Host[host] 的值对应的文档，并更新其 "haschecked" 字段为 1
+			// Find document with _id matching Host[host] value and update its "haschecked" field to 1
 			filter := bson.D{{"_id", id}}
 			update := bson.D{{"$set", bson.D{{"haschecked", 1}}}}
 			_, err := host_collection.UpdateOne(context.TODO(), filter, update)
@@ -497,11 +497,11 @@ func processRequests(client *mongo.Client, sld string, ips []string, Hosts map[s
 		}
 	}
 	wg2.Wait()
-	close(hcResults) // 关闭通道保证消费者读取通道完成后不再阻塞直接退出
+	close(hcResults) // Close channel to ensure consumer exits without blocking after reading channel completes
 	wg1.Wait()
 }
 
-// 获取title内容
+// Get title content
 func getTitle(body string) string {
 	re := regexp.MustCompile(`<title>([\s\S]*?)</title>`)
 	match := re.FindStringSubmatch(body)
@@ -512,7 +512,7 @@ func getTitle(body string) string {
 	}
 }
 
-// 发起http请求，增加请求头Host
+// Send HTTP request with Host header added
 func getPageContent(urlStr string, hostName string) *Response {
 	//display 'Unsolicited response received on idle HTTP channel starting with "\n"; err=<nil>' error
 	log.SetOutput(io.Discard)
@@ -522,11 +522,11 @@ func getPageContent(urlStr string, hostName string) *Response {
 	logger.Out = io.Discard
 
 	client := resty.New().SetLogger(logger)
-	//忽略证书错误
+	// Ignore certificate errors
 	client.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true})
-	//设置超时时间
-	client.SetTimeout(time.Duration(3 * time.Second)) //超时时间设置为3s
-	//设置请求头
+	// Set timeout
+	client.SetTimeout(time.Duration(3 * time.Second)) // Set timeout to 3s
+	// Set request headers
 	if hostName != "" {
 		client.SetHeaders(map[string]string{
 			"Host":            hostName,
@@ -539,15 +539,15 @@ func getPageContent(urlStr string, hostName string) *Response {
 			"Accept-Encoding": "gzip",
 		})
 	}
-	//取消自动跳转
+	// Disable automatic redirect
 	client.SetRedirectPolicy(resty.NoRedirectPolicy())
-	//GET请求结束时，立即断开TCP连接，降低服务器负载
+	// Immediately close TCP connection when GET request ends, reduce server load
 	client.SetCloseConnection(true)
 
-	//重试1次，中间间隔2s
+	// Retry 1 time, with 2s interval
 	client.SetRetryCount(1).SetRetryWaitTime(2 * time.Second).SetRetryMaxWaitTime(3 * time.Second)
 
-	//发起http请求
+	// Send HTTP request
 	resp, err := client.R().Get(urlStr)
 	if err != nil {
 		// fmt.Println(err)
@@ -564,14 +564,14 @@ func getPageContent(urlStr string, hostName string) *Response {
 			}
 		} else {
 			statusCode := resp.StatusCode()
-			// 收集错误响应的头信息
+			// Collect error response header information
 			headers := make(bson.M)
 			for k, v := range resp.Header() {
 				headers[k] = v
 			}
 			if statusCode > 300 && statusCode < 400 {
 				if locations, exists := resp.RawResponse.Header["Location"]; exists && len(locations) > 0 {
-					// 获取 Location 字段的第一个值
+					// Get the first value of Location field
 					location := locations[0]
 					return &Response{
 						URL:        urlStr,
@@ -597,11 +597,11 @@ func getPageContent(urlStr string, hostName string) *Response {
 			}
 		}
 	} else {
-		//读取http响应内容
+		// Read HTTP response content
 		body := resp.String()
 		title := getTitle(body)
 		lenPage := len(body)
-		//截取返回内容，避免内容过大占用内存
+		// Truncate returned content to avoid excessive memory usage
 		if lenPage > 500 {
 			body = body[:500]
 		}
@@ -626,78 +626,78 @@ func getPageContent(urlStr string, hostName string) *Response {
 
 func readFile2Slice(filepath string) (Lines []string, err error) {
 
-	file, err := os.Open(filepath) // 打开文件
+	file, err := os.Open(filepath) // Open file
 	if err != nil {
 		fmt.Printf("Error opening file: %v\n", err)
 		return nil, err
 	}
 	defer file.Close()
 
-	var lines []string // 创建一个切片保存文件内容
+	var lines []string // Create a slice to store file content
 
-	scanner := bufio.NewScanner(file) // 使用 bufio.Scanner 按行读取文件内容
+	scanner := bufio.NewScanner(file) // Use bufio.Scanner to read file content line by line
 	for scanner.Scan() {
-		if scanner.Text() != "" { // 排除空字符串
+		if scanner.Text() != "" { // Exclude empty strings
 			lines = append(lines, scanner.Text())
 		}
 	}
 
-	if err := scanner.Err(); err != nil { // 检查读取过程中是否有错误
+	if err := scanner.Err(); err != nil { // Check for errors during reading
 		fmt.Printf("Error reading file: %v\n", err)
 		return nil, err
 	}
 	return lines, nil
 }
 
-// 计算域名层级数量
+// Calculate the number of domain levels
 func getDMTierNums(hostname string) int {
-	// 移除末尾的点（如果有）
+	// Remove trailing dot (if any)
 	if strings.HasSuffix(hostname, ".") {
 		hostname = strings.TrimSuffix(hostname, ".")
 	}
-	// 按 "." 分割并返回分割后的数量
+	// Split by "." and return the number of parts
 	return len(strings.Split(hostname, "."))
 }
 
-// 获取域名的第 numth 部分（从右往左）
+// Get the numth part of the domain (from right to left)
 func getSLD(domain string, numth int) (string, bool) {
-	// 移除末尾的点
+	// Remove trailing dot
 	domain = strings.TrimSuffix(domain, ".")
-	// 按 "." 分割域名
+	// Split domain by "."
 	domainParts := strings.Split(domain, ".")
-	// 如果域名部分的数量不足 numth，返回 false
+	// If the number of domain parts is less than numth, return false
 	if len(domainParts) < numth {
 		return "", false
 	}
 	return domainParts[len(domainParts)-numth], true
 }
 
-// 随机抽样函数
+// Random sampling function
 func sample(slice []string, n int) []string {
 	if n >= len(slice) {
 		return slice
 	}
 
-	// 创建一个局部随机数生成器
+	// Create a local random number generator
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	// 打乱切片内容
+	// Shuffle slice content
 	r.Shuffle(len(slice), func(i, j int) {
 		slice[i], slice[j] = slice[j], slice[i]
 	})
 
-	// 返回前 n 个元素
+	// Return the first n elements
 	return slice[:n]
 }
 
 func isValidDomain(domain string) bool {
-	// 域名的正则表达式
-	// 匹配：有效域名如 example.com、sub.domain.org、xn--fiq228c.com 等
+	// Regular expression for domain names
+	// Matches: valid domains like example.com, sub.domain.org, xn--fiq228c.com, etc.
 	domainRegex := `^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`
 	matched, _ := regexp.MatchString(domainRegex, domain)
 	return matched
 }
 
-// 判断是否为公网地址
+// Check if it's a public IP address
 func isPublicIP(ipAddress string) bool {
 	ip := net.ParseIP(ipAddress)
 	if ip == nil {
@@ -705,31 +705,31 @@ func isPublicIP(ipAddress string) bool {
 		return false
 	}
 
-	// 私有地址范围
+	// Private address ranges
 	privateCIDRs := []string{
 		"10.0.0.0/8",
 		"172.16.0.0/12",
 		"192.168.0.0/16",
-		"100.64.0.0/10", // CGNAT 范围
+		"100.64.0.0/10", // CGNAT range
 	}
 
-	// 链路本地地址和多播地址范围
+	// Link-local and multicast address ranges
 	reservedCIDRs := []string{
-		"169.254.0.0/16", // 链路本地地址
-		"224.0.0.0/4",    // 多播地址
-		"240.0.0.0/4",    // 保留地址
-		"::1/128",        // IPv6 回环地址
+		"169.254.0.0/16", // Link-local address
+		"224.0.0.0/4",    // Multicast address
+		"240.0.0.0/4",    // Reserved address
+		"::1/128",        // IPv6 loopback address
 		"fc00::/7",       // IPv6 ULA
-		"fe80::/10",      // IPv6 链路本地地址
-		"ff00::/8",       // IPv6 多播地址
+		"fe80::/10",      // IPv6 link-local address
+		"ff00::/8",       // IPv6 multicast address
 	}
 
-	// 检查是否为回环地址
+	// Check if it's a loopback address
 	if ip.IsLoopback() {
 		return false
 	}
 
-	// 检查是否为私有地址或保留地址
+	// Check if it's a private or reserved address
 	for _, cidr := range append(privateCIDRs, reservedCIDRs...) {
 		_, network, _ := net.ParseCIDR(cidr)
 		if network.Contains(ip) {
@@ -737,33 +737,33 @@ func isPublicIP(ipAddress string) bool {
 		}
 	}
 
-	// 如果不是上述范围，则为公网地址
+	// If not in the above ranges, it's a public address
 	return true
 }
 
 func DomainProperty(domain string) (IsNon bool, IsInet bool, IsPub bool, Error error) {
-	// 创建两个分别请求 IPv4 和 IPv6 的 DNS 消息
+	// Create two DNS messages for IPv4 and IPv6 requests respectively
 	msgA := new(dns.Msg)
 	msgA.SetQuestion(dns.Fqdn(domain), dns.TypeA)
 	msgAAAA := new(dns.Msg)
 	msgAAAA.SetQuestion(dns.Fqdn(domain), dns.TypeAAAA)
 
-	// 设置 DNS 客户端
+	// Set up DNS client
 	client := &dns.Client{
-		Timeout: 2 * time.Second, // 设置超时时间为 2 秒
+		Timeout: 2 * time.Second, // Set timeout to 2 seconds
 	}
-	// 使用指定的 DNS 服务器
+	// Use specified DNS server
 	dnsServer := "114.114.114.114:53"
 	Error = nil
 
-	// 执行查询 IPv4
+	// Execute IPv4 query
 	IsInet_A, IsNon_A := false, false
 	responseA, _, err := client.Exchange(msgA, dnsServer)
 	if err == nil {
-		if len(responseA.Answer) == 0 { // 检查响应的答案部分是否为空
+		if len(responseA.Answer) == 0 { // Check if the answer section of the response is empty
 			IsNon_A = true
 		} else {
-			canary := true // canary用于排除len()>0但并不是ipv4的情况
+			canary := true // canary is used to exclude cases where len()>0 but it's not IPv4
 			for _, answer := range responseA.Answer {
 				if a, ok := answer.(*dns.A); ok {
 					canary = false
@@ -782,14 +782,14 @@ func DomainProperty(domain string) (IsNon bool, IsInet bool, IsPub bool, Error e
 		Error = err
 	}
 
-	// 执行查询 IPv6
+	// Execute IPv6 query
 	IsInet_AAAA, IsNon_AAAA := false, false
 	responseAAAA, _, err := client.Exchange(msgAAAA, dnsServer)
 	if err == nil {
-		if len(responseAAAA.Answer) == 0 { // 检查响应的答案部分是否为空
+		if len(responseAAAA.Answer) == 0 { // Check if the answer section of the response is empty
 			IsNon_AAAA = true
 		} else {
-			canary := true // canary用于排除len()>0但并不是ipv4的情况
+			canary := true // canary is used to exclude cases where len()>0 but it's not IPv4
 			for _, answer := range responseAAAA.Answer {
 				if a, ok := answer.(*dns.AAAA); ok {
 					canary = false
@@ -826,27 +826,27 @@ func main() {
 	maxDNSRequests := flag.Int("DNSt", 500, "Number of goroutines")
 	RecheckInetdm := flag.Bool("RecheckInetdm", false, "whether Recheck Inetdm")
 
-	flag.Parse() // 解析命令行标志
+	flag.Parse() // Parse command line flags
 
 	if *sld == "" {
 		logger.Error("Parameter --sld Must be inputted!")
-		return // 缺少返回语句，添加后当参数缺失时程序退出
+		return // Missing return statement, added so program exits when parameter is missing
 	}
 
-	// 连接数据库
-	clientOptions := options.Client().ApplyURI("mongodb://HostCollision:H0stC0111s10n@202.112.47.70:27017") // 作为消费者，读取通道并且写入数据库
-	client, err := mongo.Connect(context.TODO(), clientOptions)                                             // 连接到 MongoDB
+	// Connect to database
+	clientOptions := options.Client().ApplyURI("mongodb://HostCollision:H0stC0111s10n@202.112.47.70:27017") // As consumer, read from channel and write to database
+	client, err := mongo.Connect(context.TODO(), clientOptions)                                             // Connect to MongoDB
 	if err != nil {
 		log.Fatal("Failed to connect to MongoDB:", err)
 	}
-	err = client.Ping(context.TODO(), nil) // 确保连接成功
+	err = client.Ping(context.TODO(), nil) // Ensure connection is successful
 	if err != nil {
 		log.Fatal("Failed to ping MongoDB:", err)
 	}
-	defer client.Disconnect(context.TODO()) // 关闭连接
+	defer client.Disconnect(context.TODO()) // Close connection
 	logger.Info("Successfully connected to MongoDB")
 
-	// 确定AllMidInfo中要写入的sld的_id值
+	// Determine the _id value of sld to write in AllMidInfo
 	db_for_collision := client.Database("ForCollision")
 	AllMidInfo := db_for_collision.Collection("AllMidInfo")
 	filter := bson.D{{"sld", *sld}}
@@ -858,29 +858,29 @@ func main() {
 	if err == nil {
 		sld_id = result["_id"]
 	} else if err == mongo.ErrNoDocuments {
-		// 保持 sld_id 为 false
+		// Keep sld_id as false
 	} else {
-		logger.Error(fmt.Sprintf("查询失败: %v", err))
+		logger.Error(fmt.Sprintf("Query failed: %v", err))
 		return
 	}
 
-	// 从ForCollision的集合中读取IPs，并记录IP值和intialurl值到AllMidInfo；
+	// Read IPs from ForCollision collection and record IP values and initialurl values to AllMidInfo
 	var ips []string
 	IPForCollisionExist, err := collectionExists(db_for_collision, *sld+"-ip")
 	if IPForCollisionExist {
 		collection_for_collision := db_for_collision.Collection(*sld + "-ip")
-		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second) // 设置读取超时时间为300秒
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second) // Set read timeout to 300 seconds
 		defer cancel()
 		cursor, err := collection_for_collision.Find(ctx, bson.D{})
 		if err != nil {
-			logger.Error("Error querying collection: ", err) // ip数据集合存在，但查询数据库失败
+			logger.Error("Error querying collection: ", err) // IP data collection exists, but querying database failed
 			return
 		}
 		defer cursor.Close(ctx)
 		for cursor.Next(ctx) {
 			var result bson.M
 			if err := cursor.Decode(&result); err != nil {
-				logger.Error("Error decoding document: ", err) // 解码失败
+				logger.Error("Error decoding document: ", err) // Decoding failed
 				continue
 			}
 			if ip, ok := result["ip"].(string); ok {
@@ -890,7 +890,7 @@ func main() {
 			}
 		}
 		if err := cursor.Err(); err != nil {
-			logger.Error("Error iterating over cursor: ", err) // 遍历失败
+			logger.Error("Error iterating over cursor: ", err) // Iteration failed
 		}
 	} else {
 		logger.Info("IPForCollision Not Exist, then read from localfile...")
@@ -902,11 +902,11 @@ func main() {
 			return
 		}
 		if len(ips) == 1 && ips[0] == "null" {
-			ips = []string{} // 如果只有一个元素且为null，则清空切片
+			ips = []string{} // If there's only one element and it's null, clear the slice
 		}
 	}
 	if !*RecheckInetdm {
-		// 检查是否需要重新检查
+		// Check if recheck is needed
 		update_info := bson.M{
 			"$set": bson.M{
 				"ip":         len(ips),
@@ -919,7 +919,7 @@ func main() {
 
 	db := client.Database("hosts-ok-supervisor-1")
 	if !*RecheckInetdm {
-		// 如果spv_host文件不存在。生成spv_host文件，并记录inethost值\nonhost值\finalhost值到AllMidInfo；
+		// If spv_host file doesn't exist, generate spv_host file and record inethost value, nonhost value, finalhost value to AllMidInfo
 		spv_host := *sld + "-host"
 		hostExist, _ := collectionExists(db, spv_host)
 		host_collection := db.Collection(spv_host)
@@ -931,18 +931,18 @@ func main() {
 			InetDMForCollisionExist, err := collectionExists(db_for_collision, *sld+"-inetdm")
 			if InetDMForCollisionExist {
 				collection_for_collision := db_for_collision.Collection(*sld + "-inetdm")
-				ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Second) // 设置读取超时时间为1200秒
+				ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Second) // Set read timeout to 1200 seconds
 				defer cancel()
 				cursor, err := collection_for_collision.Find(ctx, bson.D{})
 				if err != nil {
-					logger.Error("Error querying collection: ", err) //  inetdm数据集合存在，但查询数据库失败
+					logger.Error("Error querying collection: ", err) // inetdm data collection exists, but querying database failed
 					return
 				}
 				defer cursor.Close(ctx)
 				for cursor.Next(ctx) {
 					var result bson.M
 					if err := cursor.Decode(&result); err != nil {
-						logger.Error("Error decoding document: ", err) // 解码失败
+						logger.Error("Error decoding document: ", err) // Decoding failed
 						continue
 					}
 					if hostname, ok := result["domain"].(string); ok {
@@ -961,18 +961,18 @@ func main() {
 			NondmForCollisionExist, err := collectionExists(db_for_collision, *sld+"-nondm")
 			if NondmForCollisionExist {
 				collection_for_collision := db_for_collision.Collection(*sld + "-nondm")
-				ctx, cancel := context.WithTimeout(context.Background(), 2400*time.Second) // 设置读取超时时间为2400秒
+				ctx, cancel := context.WithTimeout(context.Background(), 2400*time.Second) // Set read timeout to 2400 seconds
 				defer cancel()
 				cursor, err := collection_for_collision.Find(ctx, bson.D{})
 				if err != nil {
-					logger.Error("Error querying collection: ", err) //  nondm数据集合存在，但查询数据库失败
+					logger.Error("Error querying collection: ", err) // nondm data collection exists, but querying database failed
 					return
 				}
 				defer cursor.Close(ctx)
 				for cursor.Next(ctx) {
 					var result bson.M
 					if err := cursor.Decode(&result); err != nil {
-						logger.Error("Error decoding document: ", err) // 解码失败
+						logger.Error("Error decoding document: ", err) // Decoding failed
 						continue
 					}
 					if hostname, ok := result["domain"].(string); ok {
@@ -995,10 +995,10 @@ func main() {
 					"nondm":  len(noniphosts),
 				})
 				if err != nil {
-					logger.Error("插入失败: ", err)
+					logger.Error("Insert failed: ", err)
 					return
 				}
-				sld_id = insertResult.InsertedID // 获取新插入记录的_id
+				sld_id = insertResult.InsertedID // Get _id of newly inserted record
 			} else {
 				update_info := bson.M{
 					"$set": bson.M{
@@ -1010,22 +1010,22 @@ func main() {
 			}
 			logger.Info(fmt.Sprintf("inethosts: %d\nnoniphosts: %d", len(inethosts), len(noniphosts)))
 
-			// 分组临时字典
+			// Grouping temporary dictionary
 			tmpDict := make(map[string][]string)
 			semaphore := make(chan struct{}, *maxDNSRequests)
-			var mu sync.Mutex // 用于保护 tmpDict
+			var mu sync.Mutex // Used to protect tmpDict
 			var wg sync.WaitGroup
 			for _, host := range noniphosts {
-				// 填充 tmpDict
+				// Populate tmpDict
 				if !isValidDomain(host) {
 					if *useDNS {
 						logger.Warn(host + " ------ Format Error.")
 					}
-					continue // 只记录有效域名
+					continue // Only record valid domains
 				}
 
 				if *useDNS {
-					semaphore <- struct{}{} // 信号量控制最多运行的协程数
+					semaphore <- struct{}{} // Semaphore controls maximum number of running goroutines
 					wg.Add(1)
 					go func(host string) {
 						defer func() {
@@ -1033,12 +1033,12 @@ func main() {
 							wg.Done()
 						}()
 						IsNon, IsInet, IsPub, Error := DomainProperty(host)
-						if IsNon { // 只记录有效域名和解析为空值的域名
+						if IsNon { // Only record valid domains and domains that resolve to empty values
 							h, ok := getSLD(host, getDMTierNums(*sld)+1)
 							if ok {
-								mu.Lock() // 锁定 tmpDict
+								mu.Lock() // Lock tmpDict
 								tmpDict[h] = append(tmpDict[h], host)
-								mu.Unlock() // 解锁 tmpDict
+								mu.Unlock() // Unlock tmpDict
 							}
 						} else if IsInet {
 							inethosts = append(inethosts, host)
@@ -1056,29 +1056,29 @@ func main() {
 					}
 				}
 			}
-			// 将域名切片转换为插入格式
+			// Convert domain slice to insert format
 			var documents []interface{}
 			for _, hostname := range inethosts {
 				documents = append(documents, bson.M{"hostname": hostname, "haschecked": 0, "isinetdm": "true"})
 			}
 
-			// 从每个 SLD 中选择域名
-			rand.New(rand.NewSource(time.Now().UnixNano())) // 设置随机数种子
+			// Select domains from each SLD
+			rand.New(rand.NewSource(time.Now().UnixNano())) // Set random seed
 			for _, domains := range tmpDict {
 				nums := len(domains)
-				if nums > 2 { // 随机选取 2 个域名
+				if nums > 2 { // Randomly select 2 domains
 					selected := sample(domains, 2)
 					noniphosts_selected = append(noniphosts_selected, selected...)
-				} else { // 全部加入
+				} else { // Add all
 					noniphosts_selected = append(noniphosts_selected, domains...)
 				}
 			}
 
-			// 将域名切片转换为插入格式
+			// Convert domain slice to insert format
 			for _, hostname := range noniphosts_selected {
 				documents = append(documents, bson.M{"hostname": hostname, "haschecked": 0, "isinetdm": "false"})
 			}
-			// 插入多个文档
+			// Insert multiple documents
 			ctx, cancel := context.WithTimeout(context.Background(), 18000*time.Second)
 			defer cancel()
 			if len(documents) == 0 {
@@ -1103,90 +1103,90 @@ func main() {
 			}
 			AllMidInfo.UpdateOne(ctx, bson.M{"_id": sld_id}, update_info)
 		} else {
-			// 检查 host_collection 的所有记录，没有 haschecked 字段的记录添加 {haschecked: 0}
+			// Check all records in host_collection, add {haschecked: 0} to records without haschecked field
 			filter := bson.M{"haschecked": bson.M{"$exists": false}}
 			update := bson.M{"$set": bson.M{"haschecked": 0}}
 			_, err = host_collection.UpdateMany(ctx, filter, update)
 			if err != nil {
-				logger.Error(fmt.Sprintf("更新 host_collection 中缺少 haschecked 字段的记录失败: %v", err))
+				logger.Error(fmt.Sprintf("Failed to update records missing haschecked field in host_collection: %v", err))
 				return
 			}
-			logger.Info("成功为 host_collection 中缺少 haschecked 字段的记录添加 haschecked: 0")
+			logger.Info("Successfully added haschecked: 0 to records missing haschecked field in host_collection")
 		}
-		// 判断 *sld-spv 集合是否存在
+		// Check if *sld-spv collection exists
 		spvCollectionName := *sld + "-spv"
 		spvExist, err := collectionExists(db, spvCollectionName)
 		if err != nil {
-			logger.Error(fmt.Sprintf("检查 %s 集合是否存在时出错: %v", spvCollectionName, err))
+			logger.Error(fmt.Sprintf("Error checking if %s collection exists: %v", spvCollectionName, err))
 			return
 		}
 		if spvExist {
-			logger.Info(fmt.Sprintf("%s 集合存在", spvCollectionName))
-			// 取 spvCollection 的最后一条记录的 host 值
+			logger.Info(fmt.Sprintf("%s collection exists", spvCollectionName))
+			// Get the host value from the last record in spvCollection
 			spvCollection := db.Collection(spvCollectionName)
-			// 按 _id 降序排序，取第一条记录，即最后一条记录
+			// Sort by _id in descending order, get the first record, which is the last record
 			findOptions := options.FindOne().SetSort(bson.D{{Key: "_id", Value: -1}})
 			var spvResult bson.M
 			err = spvCollection.FindOne(ctx, bson.M{}, findOptions).Decode(&spvResult)
 			if err != nil {
 				if err == mongo.ErrNoDocuments {
-					logger.Info(fmt.Sprintf("%s 集合为空", spvCollectionName))
+					logger.Info(fmt.Sprintf("%s collection is empty", spvCollectionName))
 				} else {
-					logger.Error(fmt.Sprintf("查询 %s 集合最后一条记录失败: %v", spvCollectionName, err))
+					logger.Error(fmt.Sprintf("Failed to query last record in %s collection: %v", spvCollectionName, err))
 					return
 				}
 			}
-			// 提取 host 值
+			// Extract host value
 			host, ok := spvResult["host"].(string)
 			if !ok {
-				logger.Error(fmt.Sprintf("%s 集合最后一条记录中未找到有效的 host 字段", spvCollectionName))
+				logger.Error(fmt.Sprintf("No valid host field found in last record of %s collection", spvCollectionName))
 				return
 			}
 
-			// 定位到 hostCollection 的 hostname 为 host 的 _id 为 <id>
+			// Locate the record in hostCollection with hostname equal to host, get its _id as <id>
 			var hostResult bson.M
 			err = host_collection.FindOne(ctx, bson.M{"hostname": host}).Decode(&hostResult)
 			if err != nil {
 				if err == mongo.ErrNoDocuments {
-					logger.Error(fmt.Sprintf("host_collection 中未找到 hostname 为 %s 的记录", host))
+					logger.Error(fmt.Sprintf("No record with hostname %s found in host_collection", host))
 					return
 				} else {
-					logger.Error(fmt.Sprintf("查询 host_collection 中 hostname 为 %s 的记录失败: %v", host, err))
+					logger.Error(fmt.Sprintf("Failed to query record with hostname %s in host_collection: %v", host, err))
 					return
 				}
 			}
 
-			// 提取 _id 值
+			// Extract _id value
 			id, ok := hostResult["_id"]
 			if !ok {
-				logger.Error("host_collection 记录中未找到有效的 _id 字段")
+				logger.Error("No valid _id field found in host_collection record")
 				return
 			}
 
-			// 将 hostCollection 所有 _id 小于 <id> 的记录的 haschecked 的值都设置为 1
+			// Set haschecked value to 1 for all records in hostCollection with _id less than <id>
 			filter := bson.M{"_id": bson.M{"$lt": id}}
 			update := bson.M{"$set": bson.M{"haschecked": 1}}
 			_, err = host_collection.UpdateMany(ctx, filter, update)
 			if err != nil {
-				logger.Error(fmt.Sprintf("更新 host_collection 中 _id 小于 %v 的记录失败: %v", id, err))
+				logger.Error(fmt.Sprintf("Failed to update records with _id less than %v in host_collection: %v", id, err))
 				return
 			}
-			logger.Info(fmt.Sprintf("成功将 host_collection 中 _id 小于 %v 的记录的 haschecked 字段设置为 1", id))
-			// 删除 spv 集合
+			logger.Info(fmt.Sprintf("Successfully set haschecked field to 1 for records with _id less than %v in host_collection", id))
+			// Delete spv collection
 			err = spvCollection.Drop(ctx)
 			if err != nil {
-				logger.Error(fmt.Sprintf("删除 %s 集合失败: %v", spvCollectionName, err))
+				logger.Error(fmt.Sprintf("Failed to delete %s collection: %v", spvCollectionName, err))
 				return
 			}
-			logger.Info(fmt.Sprintf("成功删除 %s 集合", spvCollectionName))
+			logger.Info(fmt.Sprintf("Successfully deleted %s collection", spvCollectionName))
 		}
-		// Hosts的键值对为（host, _id）
+		// Hosts key-value pairs are (host, _id)
 		Hosts := make(map[string]interface{})
-		// host_collection存在，就使用之前的hostname
+		// If host_collection exists, use previous hostname
 		ctx, cancel := context.WithTimeout(context.Background(), 18000*time.Second)
 		defer cancel()
-		// 按 `_id` 自然顺序查询所有记录，保证和先前的host内容顺序一致
-		// 查找 haschecked 字段为 0 的记录
+		// Query all records in natural _id order to ensure consistency with previous host content order
+		// Find records with haschecked field equal to 0
 		cursor, err := host_collection.Find(ctx, bson.D{{"haschecked", 0}}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
 		if err != nil {
 			logger.Error(fmt.Sprintf("Find Error IN host_spv ---> %v", err))
@@ -1201,14 +1201,14 @@ func main() {
 				return
 			}
 
-			// 提取域名、_id和isinetdm值并加入字典
+			// Extract hostname, _id and isinetdm values and add to dictionary
 			if hostname, ok := result["hostname"].(string); ok {
 				if id, ok := result["_id"]; ok {
-					// 创建包含_id和isinetdm的map
+					// Create map containing _id and isinetdm
 					hostInfo := map[string]interface{}{
 						"_id": id,
 					}
-					// 添加isinetdm字段，默认为"unknown"如果不存在
+					// Add isinetdm field, default to "unknown" if it doesn't exist
 					if isinetdm, ok := result["isinetdm"].(string); ok {
 						hostInfo["isinetdm"] = isinetdm
 					} else {
@@ -1227,7 +1227,7 @@ func main() {
 			logger.Warn("No hosts to scan, has scanned before OR hosts is empty, stop running.")
 			return
 		}
-		// 如果 ips 为空，将 Hosts 的所有 haschecked 字段设置为 1
+		// If ips is empty, set all haschecked fields in Hosts to 1
 		if len(ips) == 0 {
 			logger.Warn("ips is empty, stop running.")
 			ctx, cancel := context.WithTimeout(context.Background(), 18000*time.Second)
@@ -1239,9 +1239,9 @@ func main() {
 			update := bson.M{"$set": bson.M{"haschecked": 1}}
 			_, err := host_collection.UpdateMany(ctx, filter, update)
 			if err != nil {
-				logger.Error(fmt.Sprintf("将 Hosts 的所有 haschecked 字段设置为 1 失败: %v", err))
+				logger.Error(fmt.Sprintf("Failed to set all haschecked fields in Hosts to 1: %v", err))
 			} else {
-				logger.Info("成功将 Hosts 的所有 haschecked 字段设置为 1")
+				logger.Info("Successfully set all haschecked fields in Hosts to 1")
 			}
 			return
 		}
@@ -1251,13 +1251,13 @@ func main() {
 		}
 		processRequests(client, *sld, ips, Hosts, *maxConcurrentRequests, sld_id, *RecheckInetdm)
 
-		// 状态码统计逻辑
+		// Status code statistics logic
 		{
-			// 连接到 hosts-ok-1 数据库
+			// Connect to hosts-ok-1 database
 			db_ok := client.Database("hosts-ok-1")
 			hc_ok_collection := db_ok.Collection(*sld + "-hosts_ok")
 
-			// 构建聚合管道统计状态码
+			// Build aggregation pipeline to count status codes
 			pipeline := mongo.Pipeline{
 				{{"$bucket", bson.D{
 					{"groupBy", "$status_code"},
@@ -1274,18 +1274,18 @@ func main() {
 
 			cursor, err := hc_ok_collection.Aggregate(ctx, pipeline)
 			if err != nil {
-				logger.Error(fmt.Sprintf("状态码统计失败: %v", err))
+				logger.Error(fmt.Sprintf("Status code statistics failed: %v", err))
 				return
 			}
 			defer cursor.Close(ctx)
 
 			var results []bson.M
 			if err = cursor.All(ctx, &results); err != nil {
-				logger.Error(fmt.Sprintf("结果解析失败: %v", err))
+				logger.Error(fmt.Sprintf("Result parsing failed: %v", err))
 				return
 			}
 
-			// 构建更新文档
+			// Build update document
 			resultData := bson.M{
 				"0":     0,
 				"200":   0,
@@ -1302,28 +1302,28 @@ func main() {
 
 			for _, result := range results {
 				if statusCode, ok := result["_id"].(int32); ok {
-					// 处理数字型状态码
+					// Handle numeric status codes
 					key := fmt.Sprintf("%d", statusCode)
 					if _, exists := resultData[key]; exists {
 						resultData[key] = result["count"]
 					} else {
-						// 不在预设列表中的状态码计入 Other
+						// Status codes not in the preset list are counted as Other
 						resultData["Other"] = resultData["Other"].(int32) + result["count"].(int32)
 					}
 				} else {
-					// 处理 Other 分类
-					logger.Error(fmt.Sprintf("状态码类型错误（出现不为数字的值）: %v", result["_id"]))
+					// Handle Other category
+					logger.Error(fmt.Sprintf("Status code type error (non-numeric value found): %v", result["_id"]))
 				}
 			}
 
-			// 更新 AllMidInfo 集合
+			// Update AllMidInfo collection
 			_, err = AllMidInfo.UpdateOne(
 				ctx,
 				bson.M{"_id": sld_id},
 				bson.M{"$set": bson.M{"Result": resultData}},
 			)
 			if err != nil {
-				logger.Error(fmt.Sprintf("状态码更新失败: %v", err))
+				logger.Error(fmt.Sprintf("Status code update failed: %v", err))
 			}
 		}
 
@@ -1335,18 +1335,18 @@ func main() {
 		InetDMForCollisionExist, _ := collectionExists(db_for_collision, *sld+"-inetdm")
 		if InetDMForCollisionExist {
 			collection_for_collision := db_for_collision.Collection(*sld + "-inetdm")
-			ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Second) // 设置读取超时时间为1200秒
+			ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Second) // Set read timeout to 1200 seconds
 			defer cancel()
 			cursor, err := collection_for_collision.Find(ctx, bson.D{})
 			if err != nil {
-				logger.Error("Error querying collection: ", err) //  inetdm数据集合存在，但查询数据库失败
+				logger.Error("Error querying collection: ", err) // inetdm data collection exists, but querying database failed
 				return
 			}
 			defer cursor.Close(ctx)
 			for cursor.Next(ctx) {
 				var result bson.M
 				if err := cursor.Decode(&result); err != nil {
-					logger.Error("Error decoding document: ", err) // 解码失败
+					logger.Error("Error decoding document: ", err) // Decoding failed
 					continue
 				}
 				if hostname, ok := result["domain"].(string); ok {
@@ -1358,10 +1358,10 @@ func main() {
 			return
 		}
 
-		// 将 inethosts 构建成 map[string]interface{} 格式
+		// Build inethosts into map[string]interface{} format
 		Hosts := make(map[string]interface{})
 		for _, host := range inethosts {
-			// 这里简单用 host 自身作为 _id 的占位值，实际使用时需要根据业务逻辑修改
+			// Here we simply use host itself as a placeholder value for _id, actual usage should be modified according to business logic
 			hostInfo := map[string]interface{}{
 				"_id":      host,
 				"isinetdm": "true",
