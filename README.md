@@ -441,7 +441,6 @@ See `requirements.txt` for complete list:
 - `tqdm>=4.64.0`: Progress bars
 - `tldextract>=5.0.0`: Domain extraction
 - `maxminddb>=2.2.0`: GeoLite2 database reader
-- And more...
 
 ### Go Dependencies
 See `host_collision_Go/go.mod`:
@@ -449,16 +448,4 @@ See `host_collision_Go/go.mod`:
 - `github.com/miekg/dns`: DNS library
 - `go.mongodb.org/mongo-driver`: MongoDB driver
 - `github.com/sirupsen/logrus`: Logging
-- And more...
 
-## License
-
-[Specify your license here]
-
-## Contributing
-
-[Add contribution guidelines if applicable]
-
-## Contact
-
-[Add contact information if applicable]
