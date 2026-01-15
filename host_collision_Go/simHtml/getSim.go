@@ -23,16 +23,16 @@ func GetSimFromFile(file1, file2 string) float64 {
 
 // String interface
 func GetSimFromStr(s1 string, s2 string) float64 {
-	// 将字符串转换为 io.Reader
+	// Convert string to io.Reader
 	reader1 := strings.NewReader(s1)
-	// 将 io.Reader 转换为 goquery.Document
+	// Convert io.Reader to goquery.Document
 	doc1, err := goquery.NewDocumentFromReader(reader1)
 	if err != nil {
 		log.Fatalf("Failed to parse HTML: %v", err)
 	}
-	// 将字符串转换为 io.Reader
+	// Convert string to io.Reader
 	reader2 := strings.NewReader(s2)
-	// 将 io.Reader 转换为 goquery.Document
+	// Convert io.Reader to goquery.Document
 	doc2, err := goquery.NewDocumentFromReader(reader2)
 	if err != nil {
 		log.Fatalf("Failed to parse HTML: %v", err)
