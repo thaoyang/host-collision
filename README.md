@@ -63,7 +63,7 @@ host-collision/
 ## Features
 
 - **Multi-stage Pipeline**: Automated workflow from domain discovery to collision testing
-- **Passive DNS Scanning**: Integration with FDP (Qianxin) passive DNS API
+- **Passive DNS Scanning**: Passive DNS API
 - **Active DNS/HTTP Scanning**: Concurrent DNS resolution and HTTP requests
 - **IP Analysis**: ASN lookup using GeoLite2-ASN database
 - **High-Performance Scanning**: Go-based collision detection with rate limiting
@@ -83,7 +83,7 @@ host-collision/
 
 ### External Services
 - MongoDB database
-- FDP (Qianxin) Passive DNS API access (optional, for passive DNS scanning)
+- FDP Passive DNS API access (optional, for passive DNS scanning)
 
 ## Installation
 
@@ -153,8 +153,8 @@ All configuration is managed through `config.json`. Key sections include:
 {
   "passiveDNS": {
     "urls": {
-      "domestic": "https://fdp.qianxin**/********/dtree/{DM}",
-      "abroad": "https://fdp.qianxin**/********/dtree/{DM}"
+      "domestic": "https://*******/********/dtree/{DM}",
+      "abroad": "https://******/********/dtree/{DM}"
     },
     "api_credentials": {
       "fdp-access": "your-access-key",
@@ -448,4 +448,5 @@ See `host_collision_Go/go.mod`:
 - `github.com/miekg/dns`: DNS library
 - `go.mongodb.org/mongo-driver`: MongoDB driver
 - `github.com/sirupsen/logrus`: Logging
+
 
