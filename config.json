@@ -23,8 +23,8 @@
   },
   "passiveDNS": {
     "urls": {
-      "domestic": "https://fdp.qianxin**/********/dtree/{DM}",
-      "abroad": "https://fdp.qianxin**/********/dtree/{DM}"
+      "domestic": "https://fdp.*******/********/*****/{DM}",
+      "abroad": "https://fdp.*******/********/*****/{DM}"
     },
     "api_credentials": {
       "fdp-access": "********",
@@ -58,8 +58,8 @@
       "hosts_ok": "{sld}-hosts_ok",
       "spv": "{sld}-spv",
       "nondm": "{sld}-nondm",
-      "dtree": "{sld}-DTree-{start_time}TO{end_time}",
-      "dtree_process": "{sld}-DTree-{start_time}TO{end_time}-Process",
+      "*****": "{sld}-*****-{start_time}TO{end_time}",
+      "*****_process": "{sld}-*****-{start_time}TO{end_time}-Process",
       "adns": "{sld}-adns",
       "adns_asn": "{sld}-adns-asn"
     },
